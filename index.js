@@ -1,17 +1,39 @@
-import fs from "fs";
-import path from "path";
+import express from "express";
 import axios from "axios";
+import cors from "cors";
 
-/* 🤖 MAIN SMART AI */
-async function handleSmartAI(sock, msg, text) {
+const app = express();
 
-    const jid = msg.key.remoteJid;
+app.use(express.json());
+app.use(cors());
 
-    try {
+/* ✅ ROOT */
+app.get("/", (req, res) => {
 
-        /* 🔥 AI RULES */
-        const systemPrompt = `
-ඔබ Sayura AI නම් WhatsApp assistant කෙනෙකි.
+  res.json({
+    status: true,
+    message: "🚀 Sayura AI Running"
+  });
+
+});
+
+/* 🤖 AI */
+app.get("/ai", async (req, res) => {
+
+  try {
+
+    const q = req.query.q;
+
+    if (!q) {
+
+      return res.status(400).json({
+        status: false,
+        error: "Query missing"
+      });
+    }
+
+    const systemPrompt = `
+ඔබ Sayura AI නම් සිංහල AI assistant කෙනෙකි.
 
 නීති:
 - සිංහලෙන් පමණක් reply කරන්න.
@@ -40,265 +62,154 @@ Normal Chat:
 - normal reply දෙන්න.
 `;
 
-        const prompt =
-`${systemPrompt}
+    let reply = null;
 
-User: ${text}`;
-
-        let aiDecision = null;
-
-        /* ✅ GEMINI */
-        try {
-
-            const gemini = await axios.post(
-
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-
-                {
-                    contents: [
-                        {
-                            parts: [
-                                {
-                                    text: prompt
-                                }
-                            ]
-                        }
-                    ],
-
-                    generationConfig: {
-                        temperature: 0.7,
-                        topP: 0.9,
-                        maxOutputTokens: 500
-                    }
-                }
-            );
-
-            aiDecision =
-                gemini.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-
-            console.log("✅ Gemini Used");
-
-        } catch (err) {
-
-            console.log("❌ Gemini Failed");
-        }
-
-        /* ✅ DEEPSEEK BACKUP */
-        if (!aiDecision) {
-
-            try {
-
-                const deepseek = await axios.post(
-
-                    "https://api.deepseek.com/chat/completions",
-
-                    {
-                        model: "deepseek-chat",
-
-                        messages: [
-                            {
-                                role: "user",
-                                content: prompt
-                            }
-                        ]
-                    },
-
-                    {
-                        headers: {
-                            Authorization:
-                                `Bearer ${process.env.DEEPSEEK_API_KEY}`,
-
-                            "Content-Type": "application/json"
-                        }
-                    }
-                );
-
-                aiDecision =
-                    deepseek.data?.choices?.[0]?.message?.content?.trim();
-
-                console.log("✅ DeepSeek Used");
-
-            } catch (err) {
-
-                console.log("❌ DeepSeek Failed");
-            }
-        }
-
-        /* ✅ OPENROUTER BACKUP */
-        if (!aiDecision) {
-
-            try {
-
-                const openrouter = await axios.post(
-
-                    "https://openrouter.ai/api/v1/chat/completions",
-
-                    {
-                        model: "openai/gpt-3.5-turbo",
-
-                        messages: [
-                            {
-                                role: "user",
-                                content: prompt
-                            }
-                        ]
-                    },
-
-                    {
-                        headers: {
-                            Authorization:
-                                `Bearer ${process.env.OPENROUTER_API_KEY}`,
-
-                            "Content-Type": "application/json"
-                        }
-                    }
-                );
-
-                aiDecision =
-                    openrouter.data?.choices?.[0]?.message?.content?.trim();
-
-                console.log("✅ OpenRouter Used");
-
-            } catch (err) {
-
-                console.log("❌ OpenRouter Failed");
-            }
-        }
-
-        /* ❌ ALL FAILED */
-        if (!aiDecision) {
-
-            return await sock.sendMessage(
-                jid,
-                {
-                    text: "⚠️ AI servers busy."
-                },
-                { quoted: msg }
-            );
-        }
-
-        /* 🎬 ASK FILM */
-        if (aiDecision === "ASK_FILM_NAME") {
-
-            return await sock.sendMessage(
-                jid,
-                {
-                    text: "චිත්‍රපටයේ නම හෝ Facebook link එක දෙන්න 🙂"
-                },
-                { quoted: msg }
-            );
-        }
-
-        /* 🎵 ASK SONG */
-        if (aiDecision === "ASK_SONG_NAME") {
-
-            return await sock.sendMessage(
-                jid,
-                {
-                    text: "සින්දුවේ නම කියන්න 🙂"
-                },
-                { quoted: msg }
-            );
-        }
-
-        /* 🎬 RUN FILM */
-        if (aiDecision.startsWith("RUN_FILM:")) {
-
-            const filmName =
-                aiDecision.replace("RUN_FILM:", "").trim();
-
-            return await executePlugin(
-                "film",
-                sock,
-                msg,
-                [filmName]
-            );
-        }
-
-        /* 🎵 RUN SONG */
-        if (aiDecision.startsWith("RUN_SONG:")) {
-
-            const songName =
-                aiDecision.replace("RUN_SONG:", "").trim();
-
-            return await executePlugin(
-                "song",
-                sock,
-                msg,
-                [songName]
-            );
-        }
-
-        /* 💬 NORMAL CHAT */
-        await sock.sendMessage(
-            jid,
-            {
-                text: aiDecision
-            },
-            { quoted: msg }
-        );
-
-    } catch (err) {
-
-        console.log("[AI ERROR]", err);
-
-        await sock.sendMessage(
-            jid,
-            {
-                text: "⚠️ AI error."
-            },
-            { quoted: msg }
-        );
-    }
-}
-
-/* 🔌 PLUGIN EXECUTOR */
-async function executePlugin(pluginName, sock, msg, args) {
-
+    /* ✅ GEMINI */
     try {
 
-        const pluginPath = path.join(
-            process.cwd(),
-            "plugins",
-            `${pluginName}.js`
-        );
+      const gemini = await axios.post(
 
-        if (!fs.existsSync(pluginPath)) {
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
 
-            return await sock.sendMessage(
-                msg.key.remoteJid,
-                {
-                    text: "⚠️ Plugin not found."
-                },
-                { quoted: msg }
-            );
-        }
-
-        /* 🔄 RELOAD */
-        const plugin =
-            await import(`file://${pluginPath}?update=${Date.now()}`);
-
-        if (plugin.execute) {
-
-            await plugin.execute(
-                sock,
-                msg,
-                args
-            );
-        }
-
-    } catch (err) {
-
-        console.log("PLUGIN ERROR:", err);
-
-        await sock.sendMessage(
-            msg.key.remoteJid,
+        {
+          contents: [
             {
-                text: "⚠️ Plugin error."
-            },
-            { quoted: msg }
-        );
-    }
-}
+              parts: [
+                {
+                  text:
+`${systemPrompt}
 
-export { handleSmartAI };
+User: ${q}`
+                }
+              ]
+            }
+          ]
+        }
+      );
+
+      reply =
+        gemini.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      console.log("✅ Gemini");
+
+    } catch (e) {
+
+      console.log(
+        "❌ Gemini:",
+        e.response?.data || e.message
+      );
+    }
+
+    /* ✅ DEEPSEEK */
+    if (!reply) {
+
+      try {
+
+        const deepseek = await axios.post(
+
+          "https://api.deepseek.com/chat/completions",
+
+          {
+            model: "deepseek-chat",
+
+            messages: [
+              {
+                role: "user",
+                content: q
+              }
+            ]
+          },
+
+          {
+            headers: {
+              Authorization:
+                `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+              "Content-Type": "application/json"
+            }
+          }
+        );
+
+        reply =
+          deepseek.data?.choices?.[0]?.message?.content;
+
+        console.log("✅ DeepSeek");
+
+      } catch (e) {
+
+        console.log(
+          "❌ DeepSeek:",
+          e.response?.data || e.message
+        );
+      }
+    }
+
+    /* ✅ OPENROUTER */
+    if (!reply) {
+
+      try {
+
+        const openrouter = await axios.post(
+
+          "https://openrouter.ai/api/v1/chat/completions",
+
+          {
+            model:
+              "deepseek/deepseek-chat-v3-0324:free",
+
+            messages: [
+              {
+                role: "user",
+                content: q
+              }
+            ]
+          },
+
+          {
+            headers: {
+              Authorization:
+                `Bearer ${process.env.OPENROUTER_API_KEY}`,
+
+              "Content-Type": "application/json"
+            }
+          }
+        );
+
+        reply =
+          openrouter.data?.choices?.[0]?.message?.content;
+
+        console.log("✅ OpenRouter");
+
+      } catch (e) {
+
+        console.log(
+          "❌ OpenRouter:",
+          e.response?.data || e.message
+        );
+      }
+    }
+
+    /* ❌ FAIL */
+    if (!reply) {
+
+      return res.status(500).json({
+        status: false,
+        error: "All AI servers failed"
+      });
+    }
+
+    res.json({
+      status: true,
+      result: reply
+    });
+
+  } catch (err) {
+
+    res.status(500).json({
+      status: false,
+      error: err.message
+    });
+  }
+});
+
+/* ✅ IMPORTANT */
+export default app;
